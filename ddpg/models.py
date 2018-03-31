@@ -50,18 +50,6 @@ def _scope_vars(scope, trainable_only=False):
         if trainable_only else tf.GraphKeys.GLOBAL_VARIABLES,
         scope=scope if isinstance(scope, str) else scope.name)
 
-def get_perturbed_actor_updates(actor, perturbed_actor, param_noise_stddev=0.1):
-    assert len(actor) == len(perturbed_actor)
-
-    updates = []
-    for var, perturbed_var in zip(actor, perturbed_actor):
-        if var in perturbed_actor:
-           updates.append(tf.assign(perturbed_var, var + tf.random_normal(tf.shape(var), mean=0., stddev=param_noise_stddev)))
-        else:
-           updates.append(tf.assign(perturbed_var, var))
-    assert len(updates) == len(actor)
-    return tf.group(*updates)
-
 
 class DDPGGraph(object):
     def __init__(self, registry, env, config):
@@ -84,6 +72,7 @@ class DDPGGraph(object):
         self.done_mask = tf.placeholder(tf.float32, [None], name="done")
         self.importance_weights = tf.placeholder(
             tf.float32, [None], name="weight")
+        self.param_noise_stddev = tf.placeholder(tf.float32, shape=(), name='param_noise_stddev')
 
         with tf.variable_scope("evaluate_func_a")as scope:
             self.a_t = self._build_actor_network(registry, self.obs_t, ac_space, config)
@@ -136,21 +125,9 @@ class DDPGGraph(object):
             update_target_expr.append(ta.assign(config["tau"] * ea + (1-config["tau"]) * ta))
             update_target_expr.append(tc.assign(config["tau"] * ec + (1 - config["tau"]) * tc))
         self.update_target_expr = tf.group(*update_target_expr)
-        if config["param_noise"]:
-            stddev = config["exploration_noise"]
-            self.param_noise = AdaptiveParamNoiseSpec(initial_stddev=float(stddev), desired_action_stddev=float(stddev))
-            assert self.param_noise is not None
-            with tf.variable_scope("param_noise_actor") as scope:
-                # target critical network evalution
-                self.perturbed_a_t = self._build_actor_network(registry, self.obs_t, ac_space, config)
-                self.perturbed_a_var_list = _scope_vars(scope.name)
-            # Configure perturbed actor.
-
-            self.param_noise_stddev = self.param_noise.current_stddev
-            self.perturb_policy_ops = get_perturbed_actor_updates(self.a_var_list, self.perturbed_a_var_list,
-                                                                )
 
     def update_target(self, sess):
+
         return sess.run(self.update_target_expr)
 
     def copy_target(self, sess):
@@ -162,10 +139,7 @@ class DDPGGraph(object):
         return sess.run(copy_target)
 
     def act(self, sess, obs, eps):
-        if self.config["param_noise"]:
-            actor_tf = self.perturbed_a_t
-        else:
-            actor_tf = self.a_t
+        actor_tf = self.a_t
         return sess.run(
             actor_tf,
             feed_dict={
@@ -175,9 +149,10 @@ class DDPGGraph(object):
 
     def compute_gradients(
             self, sess, obs_t, rew_t, obs_tp1, done_mask):
+
         self.a_grads = [g for g in self.a_grads if g is not None]
-        grads, _ = sess.run(
-            [self.a_grads, self.c_grads],
+        grads, _, action_lost, td_error = sess.run(
+            [self.a_grads, self.c_grads, self.action_lost, self.td_error],
 
             feed_dict={
                 self.obs_t: obs_t,
@@ -185,6 +160,7 @@ class DDPGGraph(object):
                 self.obs_tp1: obs_tp1,
                 self.done_mask: done_mask,
             })
+        # print('self.action_lost: {0}    self.td_error: {1}'.format(action_lost, td_error))
         return grads
 
     def apply_gradients(self, sess, grads):
@@ -212,6 +188,3 @@ class DDPGGraph(object):
         a_bound = ac_space.high
         act = tf.multiply(act, a_bound, name='scaled_a')
         return act
-        # net = tf.layers.dense(inputs, 30, activation=tf.nn.relu, name='l1', trainable=trainable)
-        # a = tf.layers.dense(net, ac_space.shape[0], activation=tf.nn.tanh, name='a', trainable=trainable)
-        # return tf.multiply(a, a_bound, name='scaled_a')

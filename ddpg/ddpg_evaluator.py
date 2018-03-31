@@ -105,9 +105,8 @@ class DDPGEvaluator(PolicyEvaluator):
         if self.config["action_noise"]:
             noise = self.exploration_noise.noise()
             assert noise.shape == action.shape
-            action= action + noise
-        # act = np.clip(action, self.action_range[0], self.action_range[1])
-        # print("acion: %f   noise: %f   "%(action,noise))
+            action = action + noise
+            # print("acion: %f   noise: %f   " % (action, noise))
         new_obs, rew, done, _ = self.env.step(action)
         ret = (self.obs, action, rew, new_obs, float(done))
         self.obs = new_obs
@@ -120,10 +119,6 @@ class DDPGEvaluator(PolicyEvaluator):
             # reinitializing random noise for action exploration
             if self.config["action_noise"]:
                 self.exploration_noise.reset()
-            elif self.config["param_noise"]:
-                self.sess.run(self.ddpg_graph.perturb_policy_ops, feed_dict={
-                    # self.ddpg_graph.param_noise_stddev: self.ddpg_graph.param_noise.current_stddev
-                })
 
         self.local_timestep += 1
         return ret

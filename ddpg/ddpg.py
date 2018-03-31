@@ -39,8 +39,7 @@ DEFAULT_CONFIG = dict(
 
     exploration_noise=0.2,
 
-    action_noise=False,
-    param_noise=True,
+    action_noise=True,
     # === Replay buffer ===
     # Size of the replay buffer. Note that if async_updates is set, then
     # each worker will have a replay buffer of this size.
